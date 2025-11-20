@@ -15,7 +15,6 @@
 - Padding: Gray (114,114,114)
 
 ### Preprocessing (Must Match Exactly!)
-```python
 Resize + letterbox to 640x640
 Pad with 114
 Divide by 255.0 → float32
