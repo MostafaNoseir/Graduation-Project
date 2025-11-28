@@ -1,4 +1,4 @@
-# web_API_sp.py  ← FINAL ACCESSIBLE WEB APP
+# web_API_sp.py
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import base64
 
-from yolo_detector_API_sp import detect_and_get_result
+from yolo_detector_API_sp import detect_english
 
 app = FastAPI()
 
@@ -111,7 +111,7 @@ async def detect(request: Request, file: UploadFile = File(...)):
     if img is None:
         result_html = '<div class="result"><h2>Error</h2><p>Cannot read image!</p></div>'
     else:
-        result_img, speech_text = detect_and_get_result(img)
+        result_img, speech_text = detect_english(img)
         _, buffer = cv2.imencode(".jpg", result_img)
         img_b64 = base64.b64encode(buffer).decode()
 
