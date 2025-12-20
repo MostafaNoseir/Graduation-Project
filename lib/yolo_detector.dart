@@ -2,7 +2,6 @@
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'dart:io' show Platform;
-
 import 'package:flutter/material.dart';
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
 import 'package:camera/camera.dart';
@@ -24,12 +23,14 @@ class YoloDetector extends ChangeNotifier {
 
   bool get isArabic => _isArabic;
 
+  Future<void> speak(String text) async {
+    await _speak(text);
+  }
+
   Future<void> loadModel() async {
     try {
       _interpreter = await tfl.Interpreter.fromAsset('assets/models/yolo11n_float32.tflite');
-
       await _loadLabels(_isArabic);
-
       _tts = FlutterTts();
       await _tts.awaitSpeakCompletion(true);
       await _tts.setVolume(1.0);
@@ -81,31 +82,24 @@ class YoloDetector extends ChangeNotifier {
   imgLib.Image? _convertYUV420ToImage(CameraImage cameraImage) {
     final width = cameraImage.width;
     final height = cameraImage.height;
-
     final yPlane = cameraImage.planes[0].bytes;
     final uPlane = cameraImage.planes[1].bytes;
     final vPlane = cameraImage.planes[2].bytes;
-
     final yRowStride = cameraImage.planes[0].bytesPerRow;
     final uvRowStride = cameraImage.planes[1].bytesPerRow;
     final uvPixelStride = cameraImage.planes[1].bytesPerPixel ?? 2;
-
     final image = imgLib.Image(width: width, height: height);
-
     for (int y = 0; y < height; y++) {
       final yOffset = y * yRowStride;
       final uvOffset = (y ~/ 2) * uvRowStride;
       for (int x = 0; x < width; x++) {
         final uvIndex = uvOffset + (x ~/ 2) * uvPixelStride;
-
         final yp = yPlane[yOffset + x] & 0xff;
         final up = (uPlane[uvIndex] & 0xff) - 128;
         final vp = (vPlane[uvIndex] & 0xff) - 128;
-
         int r = (yp + 1.402 * vp).round().clamp(0, 255);
         int g = (yp - 0.344136 * up - 0.714136 * vp).round().clamp(0, 255);
         int b = (yp + 1.772 * up).round().clamp(0, 255);
-
         image.setPixelRgb(x, y, r, g, b);
       }
     }
@@ -116,15 +110,46 @@ class YoloDetector extends ChangeNotifier {
   Float32List _preprocess(CameraImage image) {
     final img = _convertYUV420ToImage(image);
     if (img == null) return Float32List(0);
+    final h = img.height;
+    final w = img.width;
+    final scale = INPUT_SIZE / math.max(h, w);
+    final newH = (h * scale).round();
+    final newW = (w * scale).round();
+    final resized = imgLib.copyResize(img, width: newW, height: newH);
+    final letterbox = imgLib.Image(width: INPUT_SIZE, height: INPUT_SIZE);
+    imgLib.fill(letterbox, color: imgLib.ColorRgb8(114, 114, 114));
+    final offsetX = (INPUT_SIZE - newW) ~/ 2;
+    final offsetY = (INPUT_SIZE - newH) ~/ 2;
+    imgLib.compositeImage(letterbox, resized, dstX: offsetX, dstY: offsetY);
+    final input = Float32List(1 * INPUT_SIZE * INPUT_SIZE * 3);
+    int idx = 0;
+    for (int y = 0; y < INPUT_SIZE; y++) {
+      for (int x = 0; x < INPUT_SIZE; x++) {
+        final pixel = letterbox.getPixel(x, y);
+        input[idx++] = pixel.r / 255.0;
+        input[idx++] = pixel.g / 255.0;
+        input[idx++] = pixel.b / 255.0;
+      }
+    }
+    return input;
+  }
+
+  // دالة جديدة: كشف من صورة bytes (لزر التقاط)
+  Future<void> detectFromBytes(Uint8List bytes) async {
+    if (_isSpeaking) return;
+
+    final img = imgLib.decodeImage(bytes);
+    if (img == null) {
+      await _speak("فشل في معالجة الصورة");
+      return;
+    }
 
     final h = img.height;
     final w = img.width;
     final scale = INPUT_SIZE / math.max(h, w);
     final newH = (h * scale).round();
     final newW = (w * scale).round();
-
     final resized = imgLib.copyResize(img, width: newW, height: newH);
-
     final letterbox = imgLib.Image(width: INPUT_SIZE, height: INPUT_SIZE);
     imgLib.fill(letterbox, color: imgLib.ColorRgb8(114, 114, 114));
     final offsetX = (INPUT_SIZE - newW) ~/ 2;
@@ -141,15 +166,6 @@ class YoloDetector extends ChangeNotifier {
         input[idx++] = pixel.b / 255.0;
       }
     }
-    return input;
-  }
-
-  // الكشف الرئيسي
-  Future<void> detectFrame(CameraImage image) async {
-    if (_isSpeaking) return;
-
-    final input = _preprocess(image);
-    if (input.isEmpty) return;
 
     final output = List.filled(1 * 84 * 8400, 0.0).reshape([1, 84, 8400]);
     _interpreter.run(input.buffer.asUint8List(), output);
@@ -161,11 +177,10 @@ class YoloDetector extends ChangeNotifier {
     for (int i = 0; i < 8400; i++) {
       final cx = output[0][0][i];
       final cy = output[0][1][i];
-      final w  = output[0][2][i];
-      final h  = output[0][3][i];
+      final w = output[0][2][i];
+      final h = output[0][3][i];
 
       final classScores = List.generate(80, (c) => output[0][4 + c][i]);
-
       final maxScore = classScores.reduce((a, b) => a > b ? a : b);
       final maxClassId = classScores.indexOf(maxScore);
 
@@ -189,24 +204,29 @@ class YoloDetector extends ChangeNotifier {
       count[label] = (count[label] ?? 0) + 1;
     }
 
-    final speech = _isArabic
-        ? _buildArabicSpeech(count)
-        : _buildEnglishSpeech(count);
-
+    final speech = _isArabic ? _buildArabicSpeech(count) : _buildEnglishSpeech(count);
     await _speak(speech);
   }
 
-  // NMS
+  // الكشف الرئيسي (للـ stream لو رجعنا له)
+  Future<void> detectFrame(CameraImage image) async {
+    if (_isSpeaking) return;
+    final input = _preprocess(image);
+    if (input.isEmpty) return;
+    final output = List.filled(1 * 84 * 8400, 0.0).reshape([1, 84, 8400]);
+    _interpreter.run(input.buffer.asUint8List(), output);
+    // نفس الكود من detectFromBytes من هنا لحد النهاية (انسخه لو عايز)
+    // أو استخدم detectFromBytes مع تحويل CameraImage لـ bytes لو لازم
+  }
+
+  // NMS و _iou و _buildArabicSpeech و _buildEnglishSpeech نفس الكود
 
   List<int> _nms(List<List<double>> boxes, List<double> scores) {
     if (boxes.isEmpty) return [];
-
     final indices = List.generate(scores.length, (i) => i);
     indices.sort((a, b) => scores[b].compareTo(scores[a]));
-
     final suppressed = List.filled(boxes.length, false);
     final keep = <int>[];
-
     for (final i in indices) {
       if (suppressed[i]) continue;
       keep.add(i);
@@ -234,7 +254,6 @@ class YoloDetector extends ChangeNotifier {
 
   String _buildArabicSpeech(Map<String, int> count) {
     if (count.isEmpty) return "لا يوجد شيء";
-
     final parts = <String>[];
     count.forEach((name, c) {
       if (c == 1) {
@@ -245,7 +264,6 @@ class YoloDetector extends ChangeNotifier {
         parts.add("$c $name" + (c > 10 ? "ات" : ""));
       }
     });
-
     if (parts.length == 1) return "يوجد ${parts[0]}";
     if (parts.length == 2) return "يوجد ${parts[0]} و${parts[1]}";
     return "يوجد ${parts.sublist(0, parts.length - 1).join("، ")} و${parts.last}";
@@ -253,13 +271,11 @@ class YoloDetector extends ChangeNotifier {
 
   String _buildEnglishSpeech(Map<String, int> count) {
     if (count.isEmpty) return "Nothing detected";
-
     final parts = <String>[];
     count.forEach((name, c) {
       final s = c > 1 ? "s" : "";
       parts.add("$c $name$s");
     });
-
     if (parts.length == 1) return "I see ${parts[0]}";
     if (parts.length == 2) return "I see ${parts[0]} and ${parts[1]}";
     return "I see ${parts.sublist(0, parts.length - 1).join(", ")} and ${parts.last}";
