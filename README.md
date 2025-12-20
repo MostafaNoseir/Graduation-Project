@@ -1,6 +1,6 @@
 # graduation_project
 
-A new Flutter project.
+Graduation project.
 
 ## Getting Started
 
