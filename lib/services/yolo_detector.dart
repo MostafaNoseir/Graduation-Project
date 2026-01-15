@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
-import 'package:graduation_project/core/services/ttf_service.dart';
+import 'package:graduation_project/services/ttf_service.dart';
 import 'package:image/image.dart' as imgLib;
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
 
@@ -150,7 +150,6 @@ class YoloDetector {
 
       final output =
       List.filled(1 * 84 * NUM_ANCHORS, 0.0).reshape([1, 84, NUM_ANCHORS]);
-
       _interpreter.run(input.buffer.asUint8List(), output);
 
       final boxes = <List<double>>[];

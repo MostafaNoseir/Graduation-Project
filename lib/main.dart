@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:graduation_project/features/ui/camera_screen.dart';
+import 'package:graduation_project/screens/camera_screen.dart';
 
 List<CameraDescription> cameras = [];
 
