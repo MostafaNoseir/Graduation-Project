@@ -50,7 +50,6 @@ dependencies:
   path_provider: ^2.1.5
   shared_preferences: ^2.5.4
   image: ^4.2.0
-path_provider: ^2.1.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -71,9 +70,8 @@ flutter:
 
   assets:
     - assets/models/yolo11n_float32.tflite
-    - assets/models/MobileFaceNet.tflite
-    - assets/labels/labels.txt
-    - assets/labels/labels_arabic.txt
+    - assets/labels/object_labels/labels.txt
+    - assets/labels/object_labels/labels_arabic.txt
     - assets/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
