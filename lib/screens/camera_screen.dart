@@ -154,7 +154,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
     if (text.contains("لون") || text.contains("color")) {
       await _captureAndProcess(
-        (bytes, _) => _colorDetector.detectDominantColor(bytes),
+        (bytes, _) => _colorDetector.detectDominantColor(bytes,isArabic: _tts.isArabic),
       );
       return;
     }
@@ -261,7 +261,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       );
                     } else if (_mode == DetectionMode.color) {
                       await _captureAndProcess(
-                        (bytes, _) => _colorDetector.detectDominantColor(bytes),
+                        (bytes, _) => _colorDetector.detectDominantColor(bytes,isArabic: _tts.isArabic),
                       );
                     } else if (_mode == DetectionMode.text) {
                       await _captureAndProcess(
