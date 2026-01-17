@@ -4,31 +4,34 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 class TextDetector {
   static final _textRecognizer = TextRecognizer();
 
-  Future<String?> extractText(String imagePath) async {
+  Future<String?> extractText(
+      String imagePath, {
+        required bool isArabic,
+      }) async {
     try {
       final inputImage = InputImage.fromFilePath(imagePath);
       final recognizedText = await _textRecognizer.processImage(inputImage);
 
-      // لو مفيش نص
+      // لا يوجد نص
       if (recognizedText.blocks.isEmpty) {
-        return "لم يتم اكتشاف أي نص في الصورة";
+        return isArabic
+            ? "لم يتم اكتشاف أي نص في الصورة"
+            : "No text was detected in the image";
       }
 
-      // ترتيب الكتل (blocks) حسب الموقع العلوي (من أعلى لأسفل)
+      // ترتيب الكتل من أعلى لأسفل
       final sortedBlocks = recognizedText.blocks.toList()
         ..sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
 
       final List<String> lines = [];
 
       for (var block in sortedBlocks) {
-        // ترتيب السطور داخل الكتلة (من أعلى لأسفل)
+        // ترتيب السطور داخل الكتلة
         final sortedLines = block.lines.toList()
           ..sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
 
         for (var line in sortedLines) {
           String lineText = line.text.trim();
-
-          // تنظيف بسيط: إزالة مسافات زايدة
           lineText = lineText.replaceAll(RegExp(r'\s+'), ' ');
 
           if (lineText.isNotEmpty) {
@@ -36,30 +39,34 @@ class TextDetector {
           }
         }
 
-        // فاصل بين الكتل (فقرات)
+        // سطر فاضي بين الفقرات
         if (lines.isNotEmpty) {
-          lines.add(""); // سطر فارغ بين الفقرات
+          lines.add("");
         }
       }
 
-      // جمع النص كله
       String fullText = lines.join('\n').trim();
 
-      // تنظيف نهائي
       fullText = fullText
-          .replaceAll(RegExp(r'\n{3,}'), '\n\n') // مش أكتر من سطرين فارغين
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim();
 
       if (fullText.isEmpty) {
-        return "تم اكتشاف نص لكن غير قابل للقراءة";
+        return isArabic
+            ? "تم اكتشاف نص لكن غير قابل للقراءة"
+            : "Text was detected but could not be read";
       }
 
-      // كلام أحسن للـ TTS
-      return "النص المكتشف في الصورة:\n\n$fullText";
+      // نص مناسب للـ TTS
+      return isArabic
+          ? "النص المكتشف في الصورة:\n\n$fullText"
+          : "Detected text in the image:\n\n$fullText";
 
     } catch (e) {
-      print("خطأ في قراءة النص: $e");
-      return "حدث خطأ أثناء قراءة النص";
+      print("Text recognition error: $e");
+      return isArabic
+          ? "حدث خطأ أثناء قراءة النص"
+          : "An error occurred while reading the text";
     }
   }
 

@@ -91,11 +91,11 @@ class _CameraScreenState extends State<CameraScreen> {
     await _speak(
       _tts.isArabic
           ? (_currentCamera!.lensDirection == CameraLensDirection.front
-          ? "تم التبديل إلى الكاميرا الأمامية"
-          : "تم التبديل إلى الكاميرا الخلفية")
+                ? "تم التبديل إلى الكاميرا الأمامية"
+                : "تم التبديل إلى الكاميرا الخلفية")
           : (_currentCamera!.lensDirection == CameraLensDirection.front
-          ? "Switched to front camera"
-          : "Switched to back camera"),
+                ? "Switched to front camera"
+                : "Switched to back camera"),
     );
   }
 
@@ -120,7 +120,11 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (result != null) await _speak(result);
     } catch (e) {
-      await _speak("حدث خطأ");
+      if (_tts.isArabic) {
+        await _speak("حدث خطأ");
+      } else {
+        await _speak("An error occurred");
+      }
     }
 
     _busy = false;
@@ -130,12 +134,14 @@ class _CameraScreenState extends State<CameraScreen> {
     if (text.contains("عربي") || text.contains("arabic")) {
       if (!_tts.isArabic) await _tts.toggleLanguage();
       await _yolo.loadLabels();
+      setState(() {});
       return;
     }
 
     if (text.contains("english") || text.contains("انجليزي")) {
       if (_tts.isArabic) await _tts.toggleLanguage();
       await _yolo.loadLabels();
+      setState(() {});
       return;
     }
 
@@ -148,13 +154,14 @@ class _CameraScreenState extends State<CameraScreen> {
     }
 
     if (text.contains("اقرا") || text.contains("read")) {
-      await _captureAndProcess((_, path) => _textDetector.extractText(path));
+      await _captureAndProcess((_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic));
       return;
     }
 
     if (text.contains("لون") || text.contains("color")) {
       await _captureAndProcess(
-        (bytes, _) => _colorDetector.detectDominantColor(bytes,isArabic: _tts.isArabic),
+        (bytes, _) =>
+            _colorDetector.detectDominantColor(bytes, isArabic: _tts.isArabic),
       );
       return;
     }
@@ -184,6 +191,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   _holding = false;
                   _voice.disable();
                 },
+                onDoubleTap: _switchCamera
               ),
             ),
             // زر تبديل الكاميرا
@@ -215,7 +223,13 @@ class _CameraScreenState extends State<CameraScreen> {
                     color: Colors.white,
                     size: 36,
                   ),
-                  onPressed: () async => await _tts.toggleLanguage(),
+                    onPressed: () async {
+                      await _tts.toggleLanguage();
+                      await _yolo.loadLabels();
+                      setState(() {});
+                    },
+
+
                 ),
               ),
             ),
@@ -231,17 +245,17 @@ class _CameraScreenState extends State<CameraScreen> {
                     _buildModeButton(
                       DetectionMode.objects,
                       'assets/icons/recognition.png',
-                      "أشياء",
+                      _tts.isArabic ? "أشياء" : "objects",
                     ),
                     _buildModeButton(
                       DetectionMode.color,
                       'assets/icons/color.png',
-                      "لون",
+                      _tts.isArabic ? "الوان" : "colors",
                     ),
                     _buildModeButton(
                       DetectionMode.text,
                       'assets/icons/text.png',
-                      "نص",
+                      _tts.isArabic ? "نص" : "text",
                     ),
                   ],
                 ),
@@ -258,14 +272,18 @@ class _CameraScreenState extends State<CameraScreen> {
                     if (_mode == DetectionMode.objects) {
                       await _captureAndProcess(
                         (bytes, _) => _yolo.detectImage(bytes),
+
                       );
                     } else if (_mode == DetectionMode.color) {
                       await _captureAndProcess(
-                        (bytes, _) => _colorDetector.detectDominantColor(bytes,isArabic: _tts.isArabic),
+                        (bytes, _) => _colorDetector.detectDominantColor(
+                          bytes,
+                          isArabic: _tts.isArabic,
+                        ),
                       );
                     } else if (_mode == DetectionMode.text) {
                       await _captureAndProcess(
-                        (_, path) => _textDetector.extractText(path),
+                        (_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic),
                       );
                     }
                   },
@@ -276,8 +294,8 @@ class _CameraScreenState extends State<CameraScreen> {
                     child: Image.asset(
                       'assets/icons/eye.png',
                       width: 50,
-                      height:50,
-                      color:Colors.black,
+                      height: 50,
+                      color: Colors.black,
                     ),
                   ),
                 ),
@@ -295,7 +313,11 @@ class _CameraScreenState extends State<CameraScreen> {
     return GestureDetector(
       onTap: () async {
         setState(() => _mode = mode);
-        await _speak("تم تفعيل $label");
+        if (_tts.isArabic) {
+          await _speak("تم تفعيل $label");
+        } else {
+          await _speak("Mode changed to $label");
+        }
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
