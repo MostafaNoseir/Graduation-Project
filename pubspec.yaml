@@ -70,8 +70,8 @@ flutter:
 
   assets:
     - assets/models/yolo11n_float32.tflite
-    - assets/labels/object_labels/labels.txt
-    - assets/labels/object_labels/labels_arabic.txt
+    - assets/labels/labels.txt
+    - assets/labels/labels_arabic.txt
     - assets/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
