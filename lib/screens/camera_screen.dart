@@ -8,8 +8,8 @@ import 'package:graduation_project/services/ttf_service.dart';
 import 'package:graduation_project/services/voice_command_service.dart';
 import 'package:graduation_project/services/yolo_detector.dart';
 import 'package:graduation_project/main.dart';
-
-enum DetectionMode { objects, color, text }
+import 'package:graduation_project/services/currency_detector.dart';
+enum DetectionMode { objects, color, text, currency }
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -26,7 +26,7 @@ class _CameraScreenState extends State<CameraScreen> {
   late final YoloDetector _yolo;
   late final ColorDetector _colorDetector;
   late final TextDetector _textDetector;
-
+  late final CurrencyDetector _currencyDetector;
   DetectionMode _mode = DetectionMode.objects;
   bool _busy = false;
   CameraDescription? _currentCamera;
@@ -55,6 +55,9 @@ class _CameraScreenState extends State<CameraScreen> {
 
     _currentCamera = cameras.first;
     await _cameraService.init(_currentCamera!);
+
+    _currencyDetector = CurrencyDetector();
+    await _currencyDetector.loadModel();
 
     setState(() {});
     // مش بنشغل الاستماع تلقائي، كله عن طريق Hold
@@ -165,6 +168,14 @@ class _CameraScreenState extends State<CameraScreen> {
       );
       return;
     }
+
+    if (text.contains("عملة") || text.contains("فلوس") || text.contains("جنيه") ||
+        text.contains("currency") || text.contains("money") || text.contains("note")) {
+      await _captureAndProcess(
+            (bytes, _) => _currencyDetector.detectCurrency(bytes, isArabic: _tts.isArabic),
+      );
+      return;
+    }
   }
 
   @override
@@ -257,6 +268,11 @@ class _CameraScreenState extends State<CameraScreen> {
                       'assets/icons/text.png',
                       _tts.isArabic ? "نص" : "text",
                     ),
+                    _buildModeButton(
+                      DetectionMode.currency,
+                      'assets/icons/money.png',  // ← أضف أيقونة مناسبة
+                      _tts.isArabic ? "عملة" : "currency",
+                    ),
                   ],
                 ),
               ),
@@ -284,6 +300,10 @@ class _CameraScreenState extends State<CameraScreen> {
                     } else if (_mode == DetectionMode.text) {
                       await _captureAndProcess(
                         (_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic),
+                      );
+                    } else if (_mode == DetectionMode.currency) {
+                      await _captureAndProcess(
+                            (bytes, _) => _currencyDetector.detectCurrency(bytes, isArabic: _tts.isArabic),
                       );
                     }
                   },
@@ -351,6 +371,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _tts.dispose();
     _yolo.dispose();
     TextDetector.dispose();
+    _currencyDetector.dispose();
     super.dispose();
   }
 }
