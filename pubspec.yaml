@@ -51,6 +51,7 @@ dependencies:
   shared_preferences: ^2.5.4
   image: ^4.2.0
   flutter_tesseract_ocr: ^0.4.30
+  google_mlkit_face_detection: ^0.13.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -72,6 +73,8 @@ flutter:
   assets:
     - assets/models/yolo11n_float32.tflite
     - assets/models/egypt_currency_model.tflite
+    - assets/models/facenet.tflite
+    - assets/models/mobilefacenet.tflite
     - assets/labels/labels.txt
     - assets/labels/labels_arabic.txt
     - assets/icons/

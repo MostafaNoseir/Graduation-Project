@@ -1,3 +1,6 @@
+// camera_screen.dart  –  نسخة معدّلة تضيف DetectionMode.face
+// التغييرات موضّحة بـ "// ✅ NEW"
+
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -9,7 +12,10 @@ import 'package:graduation_project/services/voice_command_service.dart';
 import 'package:graduation_project/services/yolo_detector.dart';
 import 'package:graduation_project/main.dart';
 import 'package:graduation_project/services/currency_detector.dart';
-enum DetectionMode { objects, color, text, currency }
+import 'package:graduation_project/services/face_recognition_service.dart'; // ✅ NEW
+
+// ✅ NEW – أضفنا face
+enum DetectionMode { objects, color, text, currency, face }
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -27,12 +33,14 @@ class _CameraScreenState extends State<CameraScreen> {
   late final ColorDetector _colorDetector;
   late final TextDetector _textDetector;
   late final CurrencyDetector _currencyDetector;
+  late final FaceRecognitionService _faceService; // ✅ NEW
+
   DetectionMode _mode = DetectionMode.objects;
   bool _busy = false;
   CameraDescription? _currentCamera;
-
-  // حالة الـHold
   bool _holding = false;
+  // ✅ NEW – لتتبع عملية التسجيل
+  bool _enrolling = false;
 
   @override
   void initState() {
@@ -40,51 +48,61 @@ class _CameraScreenState extends State<CameraScreen> {
     _init();
   }
 
+  bool _isReady = false;
+
   Future<void> _init() async {
-    _tts = TtsService();
-    await _tts.init();
+    try {
+      _tts = TtsService();
+      await _tts.init();
 
-    _voice = VoiceCommandService();
-    await _voice.init();
+      _voice = VoiceCommandService();
+      await _voice.init();
 
-    _yolo = YoloDetector(_tts);
-    await _yolo.loadModel();
+      _yolo = YoloDetector(_tts);
+      await _yolo.loadModel();
 
-    _colorDetector = ColorDetector();
-    _textDetector = TextDetector();
+      _colorDetector = ColorDetector();
+      _textDetector = TextDetector();
 
-    _currentCamera = cameras.first;
-    await _cameraService.init(_currentCamera!);
+      _currentCamera = cameras.first;
+      await _cameraService.init(_currentCamera!);
 
-    _currencyDetector = CurrencyDetector();
-    await _currencyDetector.loadModel();
+      _currencyDetector = CurrencyDetector();
+      await _currencyDetector.loadModel();
 
-    setState(() {});
-    // مش بنشغل الاستماع تلقائي، كله عن طريق Hold
-  }
+      _faceService = FaceRecognitionService();
+      await _faceService.init();
 
-  // دالة _speak توقف الاستماع أثناء الكلام
+      _isReady = true;
+      setState(() {});
+    } catch (e) {
+      _isReady = false;
+      print("Init failed: $e");
+    }
+  }  // ─────────────────────────────────────────────────────────────────────────
+  //  SPEAK
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _speak(String text) async {
-    if (!_holding) _voice.disable(); // وقف الاستماع لو مش Hold
+    if (!_holding) _voice.disable();
     await _tts.speak(text);
-    if (_holding) {
-      _voice.startListening(_onVoiceCommand);
-    } // رجع الاستماع لو مش Hold
+    if (_holding) _voice.startListening(_onVoiceCommand);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  SWITCH CAMERA
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _switchCamera() async {
     if (cameras.length < 2) {
-      await _speak("لا توجد كاميرا أخرى متاحة");
+      await _speak(_tts.isArabic ? "لا توجد كاميرا أخرى متاحة" : "No other camera available");
       return;
     }
 
-    final newLensDirection =
-        _currentCamera!.lensDirection == CameraLensDirection.front
+    final newDir = _currentCamera!.lensDirection == CameraLensDirection.front
         ? CameraLensDirection.back
         : CameraLensDirection.front;
 
     _currentCamera = cameras.firstWhere(
-      (camera) => camera.lensDirection == newLensDirection,
+          (c) => c.lensDirection == newDir,
       orElse: () => cameras.first,
     );
 
@@ -94,17 +112,20 @@ class _CameraScreenState extends State<CameraScreen> {
     await _speak(
       _tts.isArabic
           ? (_currentCamera!.lensDirection == CameraLensDirection.front
-                ? "تم التبديل إلى الكاميرا الأمامية"
-                : "تم التبديل إلى الكاميرا الخلفية")
+          ? "تم التبديل إلى الكاميرا الأمامية"
+          : "تم التبديل إلى الكاميرا الخلفية")
           : (_currentCamera!.lensDirection == CameraLensDirection.front
-                ? "Switched to front camera"
-                : "Switched to back camera"),
+          ? "Switched to front camera"
+          : "Switched to back camera"),
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  CAPTURE + PROCESS  (للأوضاع العادية)
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _captureAndProcess(
-    Future<String?> Function(Uint8List bytes, String path) task,
-  ) async {
+      Future<String?> Function(Uint8List bytes, String path) task,
+      ) async {
     if (_busy) return;
     _busy = true;
 
@@ -113,26 +134,120 @@ class _CameraScreenState extends State<CameraScreen> {
 
       final XFile? file = await _cameraService.takePicture();
       if (file == null) {
-        await _speak("فشل التصوير");
+        await _speak(_tts.isArabic ? "فشل التصوير" : "Capture failed");
         _busy = false;
         return;
       }
 
-      final bytes = await file.readAsBytes();
+      final bytes  = await file.readAsBytes();
       final result = await task(bytes, file.path);
-
       if (result != null) await _speak(result);
-    } catch (e) {
-      if (_tts.isArabic) {
-        await _speak("حدث خطأ");
-      } else {
-        await _speak("An error occurred");
-      }
+    } catch (_) {
+      await _speak(_tts.isArabic ? "حدث خطأ" : "An error occurred");
     }
 
     _busy = false;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ✅ NEW –  تسجيل وجه جديد (Enroll)
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _startEnroll() async {
+    if (_busy || _enrolling) return;
+
+    // 1. اطلب الاسم
+    final name = await _showNameDialog();
+    if (name == null || name.trim().isEmpty) return;
+
+    _enrolling = true;
+    _busy      = true;
+
+    final isAr = _tts.isArabic;
+
+    await _speak(
+      isAr
+          ? "سألتقط عشر صور، ابق ثابتا أمام الكاميرا"
+          : "I will capture 10 photos, stay still",
+    );
+
+    final samples = <({Uint8List bytes, String path})>[];
+
+    for (int i = 0; i < 10; i++) {
+      await Future.delayed(const Duration(milliseconds: 600));
+      final file = await _cameraService.takePicture();
+      if (file == null) continue;
+      samples.add((bytes: await file.readAsBytes(), path: file.path));
+    }
+
+    final ok = await _faceService.enrollPerson(name.trim(), samples);
+
+    await _speak(
+      ok
+          ? (isAr
+          ? "تم تسجيل $name بنجاح"
+          : "Enrolled $name successfully")
+          : (isAr
+          ? "فشل التسجيل، حاول في إضاءة أفضل"
+          : "Enrollment failed, try better lighting"),
+    );
+
+    _enrolling = false;
+    _busy      = false;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ✅ NEW –  Dialog لإدخال الاسم
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<String?> _showNameDialog() async {
+    final controller = TextEditingController();
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: Text(
+          _tts.isArabic ? "أدخل اسم الشخص" : "Enter person's name",
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: _tts.isArabic ? "مثال: أحمد" : "e.g. Ahmed",
+            hintStyle: const TextStyle(color: Colors.grey),
+            enabledBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white54),
+            ),
+            focusedBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              _tts.isArabic ? "إلغاء" : "Cancel",
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: Text(
+              _tts.isArabic ? "تأكيد" : "Confirm",
+              style: const TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  VOICE COMMANDS
+  // ─────────────────────────────────────────────────────────────────────────
   void _onVoiceCommand(String text) async {
     if (text.contains("عربي") || text.contains("arabic")) {
       if (!_tts.isArabic) await _tts.toggleLanguage();
@@ -148,36 +263,55 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
-    if (text.contains("شوف") ||
-        text.contains("ايه") ||
-        text.contains("what") ||
-        text.contains("object")) {
+    if (text.contains("شوف") || text.contains("ايه") ||
+        text.contains("what") || text.contains("object")) {
       await _captureAndProcess((bytes, _) => _yolo.detectImage(bytes));
       return;
     }
 
     if (text.contains("اقرا") || text.contains("read")) {
-      await _captureAndProcess((_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic));
+      await _captureAndProcess(
+              (_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic));
       return;
     }
 
     if (text.contains("لون") || text.contains("color")) {
       await _captureAndProcess(
-        (bytes, _) =>
+            (bytes, _) =>
             _colorDetector.detectDominantColor(bytes, isArabic: _tts.isArabic),
       );
       return;
     }
 
-    if (text.contains("عملة") || text.contains("فلوس") || text.contains("جنيه") ||
-        text.contains("currency") || text.contains("money") || text.contains("note")) {
+    if (text.contains("عملة") || text.contains("فلوس") ||
+        text.contains("currency") || text.contains("money")) {
       await _captureAndProcess(
-            (bytes, _) => _currencyDetector.detectCurrency(bytes, isArabic: _tts.isArabic),
+            (bytes, _) =>
+            _currencyDetector.detectCurrency(bytes, isArabic: _tts.isArabic),
       );
+      return;
+    }
+
+    // ✅ NEW – أوامر صوتية للوجه
+    if (text.contains("من هذا") || text.contains("من ده") ||
+        text.contains("who is") || text.contains("recognize")) {
+      await _captureAndProcess(
+            (bytes, path) =>
+            _faceService.recognizeFace(bytes, isArabic: _tts.isArabic),
+      );
+      return;
+    }
+
+    if (text.contains("سجل وجه") || text.contains("أضف شخص") ||
+        text.contains("enroll") || text.contains("add face")) {
+      await _startEnroll();
       return;
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  BUILD
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     if (_cameraService.controller == null ||
@@ -193,7 +327,7 @@ class _CameraScreenState extends State<CameraScreen> {
             CameraPreview(_cameraService.controller!),
             Positioned.fill(
               child: GestureDetector(
-                behavior: HitTestBehavior.opaque, // 🔥 مهم جدًا
+                behavior: HitTestBehavior.opaque,
                 onLongPressStart: (_) {
                   _holding = true;
                   _voice.enable(_onVoiceCommand);
@@ -202,10 +336,11 @@ class _CameraScreenState extends State<CameraScreen> {
                   _holding = false;
                   _voice.disable();
                 },
-                onDoubleTap: _switchCamera
+                onDoubleTap: _switchCamera,
               ),
             ),
-            // زر تبديل الكاميرا
+
+            // ── زر تبديل الكاميرا ──────────────────────────────────────
             Align(
               alignment: Alignment.topLeft,
               child: Padding(
@@ -223,29 +358,23 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
             ),
 
-            // زر تغيير اللغة
+            // ── زر اللغة ───────────────────────────────────────────────
             Align(
               alignment: Alignment.topRight,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: IconButton(
-                  icon: const Icon(
-                    Icons.language,
-                    color: Colors.white,
-                    size: 36,
-                  ),
-                    onPressed: () async {
-                      await _tts.toggleLanguage();
-                      await _yolo.loadLabels();
-                      setState(() {});
-                    },
-
-
+                  icon: const Icon(Icons.language, color: Colors.white, size: 36),
+                  onPressed: () async {
+                    await _tts.toggleLanguage();
+                    await _yolo.loadLabels();
+                    setState(() {});
+                  },
                 ),
               ),
             ),
 
-            // أزرار اختيار المود
+            // ── أزرار المود ────────────────────────────────────────────
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
@@ -270,43 +399,29 @@ class _CameraScreenState extends State<CameraScreen> {
                     ),
                     _buildModeButton(
                       DetectionMode.currency,
-                      'assets/icons/money.png',  // ← أضف أيقونة مناسبة
+                      'assets/icons/money.png',
                       _tts.isArabic ? "عملة" : "currency",
+                    ),
+                    // ✅ NEW
+                    _buildModeButton(
+                      DetectionMode.face,
+                      'assets/icons/face.png', // ← أضف أيقونة وجه
+                      _tts.isArabic ? "وجه" : "face",
                     ),
                   ],
                 ),
               ),
             ),
 
-            // زر التقاط الصورة
+            // ── زر الالتقاط ────────────────────────────────────────────
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 160),
-                child: FloatingActionButton(
-                  onPressed: () async {
-                    if (_mode == DetectionMode.objects) {
-                      await _captureAndProcess(
-                        (bytes, _) => _yolo.detectImage(bytes),
-
-                      );
-                    } else if (_mode == DetectionMode.color) {
-                      await _captureAndProcess(
-                        (bytes, _) => _colorDetector.detectDominantColor(
-                          bytes,
-                          isArabic: _tts.isArabic,
-                        ),
-                      );
-                    } else if (_mode == DetectionMode.text) {
-                      await _captureAndProcess(
-                        (_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic),
-                      );
-                    } else if (_mode == DetectionMode.currency) {
-                      await _captureAndProcess(
-                            (bytes, _) => _currencyDetector.detectCurrency(bytes, isArabic: _tts.isArabic),
-                      );
-                    }
-                  },
+                child: _mode == DetectionMode.face // ✅ NEW – وضع الوجه له زرّين
+                    ? _buildFaceButtons()
+                    : FloatingActionButton(
+                  onPressed: _onCapturePressed,
                   backgroundColor: Colors.white,
                   child: CircleAvatar(
                     radius: 35,
@@ -321,44 +436,107 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
               ),
             ),
+
+            // ✅ NEW – مؤشر التسجيل
+            if (_enrolling)
+              Positioned(
+                top: 80,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _tts.isArabic ? "جاري التسجيل..." : "Enrolling...",
+                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
+  // ✅ NEW – زرّا وضع الوجه (تعرّف + تسجيل)
+  Widget _buildFaceButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // زر التعرف
+        FloatingActionButton(
+          heroTag: "recognize",
+          onPressed: () => _captureAndProcess(
+                (bytes, path) =>
+                _faceService.recognizeFace(bytes, isArabic: _tts.isArabic),
+          ),
+          backgroundColor: Colors.white,
+          child: const Icon(Icons.face_retouching_natural, color: Colors.black, size: 32),
+        ),
+        const SizedBox(width: 24),
+        // زر التسجيل
+        FloatingActionButton(
+          heroTag: "enroll",
+          onPressed: _startEnroll,
+          backgroundColor: Colors.blueAccent,
+          child: const Icon(Icons.person_add, color: Colors.white, size: 32),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _onCapturePressed() async {
+    switch (_mode) {
+      case DetectionMode.objects:
+        await _captureAndProcess((bytes, _) => _yolo.detectImage(bytes));
+      case DetectionMode.color:
+        await _captureAndProcess(
+              (bytes, _) =>
+              _colorDetector.detectDominantColor(bytes, isArabic: _tts.isArabic),
+        );
+      case DetectionMode.text:
+        await _captureAndProcess(
+              (_, path) => _textDetector.extractText(path, isArabic: _tts.isArabic),
+        );
+      case DetectionMode.currency:
+        await _captureAndProcess(
+              (bytes, _) =>
+              _currencyDetector.detectCurrency(bytes, isArabic: _tts.isArabic),
+        );
+      case DetectionMode.face:
+        break; // له أزراره الخاصة
+    }
+  }
+
   Widget _buildModeButton(DetectionMode mode, String imagePath, String label) {
     final isSelected = _mode == mode;
-
     return GestureDetector(
       onTap: () async {
         setState(() => _mode = mode);
-        if (_tts.isArabic) {
-          await _speak("تم تفعيل $label");
-        } else {
-          await _speak("Mode changed to $label");
-        }
+        await _speak(_tts.isArabic ? "تم تفعيل $label" : "Mode changed to $label");
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           CircleAvatar(
-            radius: 35,
+            radius: 30, // ✅ قلّلنا الحجم قليلا عشان يتسع للزر الخامس
             backgroundColor: isSelected
                 ? Colors.white
                 : Colors.white.withValues(alpha: 0.3),
             child: Image.asset(
               imagePath,
-              width: 40,
-              height: 40,
+              width: 36,
+              height: 36,
               color: isSelected ? Colors.black : Colors.white,
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
-          ),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 13)),
         ],
       ),
     );
@@ -372,6 +550,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _yolo.dispose();
     TextDetector.dispose();
     _currencyDetector.dispose();
+    _faceService.dispose(); // ✅ NEW
     super.dispose();
   }
 }
