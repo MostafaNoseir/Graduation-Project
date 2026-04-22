@@ -130,7 +130,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _busy = true;
 
     try {
-      await _speak(_tts.isArabic ? "لحظة واحدة" : "One moment");
+      // await _speak(_tts.isArabic ? "لحظة واحدة" : "One moment");
 
       final XFile? file = await _cameraService.takePicture();
       if (file == null) {

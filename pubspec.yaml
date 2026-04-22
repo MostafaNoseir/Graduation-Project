@@ -75,8 +75,11 @@ flutter:
     - assets/models/egypt_currency_model.tflite
     - assets/models/facenet.tflite
     - assets/models/mobilefacenet.tflite
+    - assets/models/best_float32.tflite
     - assets/labels/labels.txt
     - assets/labels/labels_arabic.txt
+    - assets/labels/labels_new.txt
+    - assets/labels/labels_arabic_new.txt
     - assets/icons/
 
 
