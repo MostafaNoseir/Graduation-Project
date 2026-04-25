@@ -5,8 +5,13 @@ class VoiceCommandService {
   final SpeechToText _speech = SpeechToText();
 
   bool _listening = false;
-  bool _enabled = false; // ✅ هل مسموح نسمع؟
+  bool _enabled = false;
   Timer? _silenceTimer;
+
+  // ✅ يتحكم في localeId — يُحدَّث من camera_screen عند تغيير اللغة
+  bool isArabic = true;
+
+  String get _localeId => isArabic ? "ar_EG" : "en_US";
 
   Future<bool> init() async {
     try {
@@ -16,37 +21,33 @@ class VoiceCommandService {
     }
   }
 
-  // 🔊 تشغيل الاستماع (من الهولد فقط)
-  void startListening(Function(String text) onResult) async {
+  void startListening(Function(String) onResult) async {
     if (_listening || !_enabled) return;
-
     _listening = true;
-
     _startSilenceTimer(onResult);
 
     await _speech.listen(
-      localeId: "ar_EG",
-      listenMode: ListenMode.confirmation,
+      localeId: _localeId, // ✅ يقرأ القيمة الحالية في كل مرة
+      listenMode: ListenMode.dictation,
       onResult: (result) {
         if (!_enabled) return;
-
         _resetSilenceTimer(onResult);
-
         if (result.finalResult) {
-          onResult(result.recognizedWords.toLowerCase());
+          final words = result.recognizedWords.trim().toLowerCase();
+          if (words.isNotEmpty) {
+            print("🎤 [$_localeId] $words");
+            onResult(words);
+          }
           _restartListening(onResult);
         }
       },
     );
   }
 
-  // ===================== SILENCE TIMER =====================
   void _startSilenceTimer(Function(String) onResult) {
     _silenceTimer?.cancel();
-    _silenceTimer = Timer(const Duration(seconds: 3), () {
-      if (_enabled) {
-        _restartListening(onResult);
-      }
+    _silenceTimer = Timer(const Duration(seconds: 4), () {
+      if (_enabled) _restartListening(onResult);
     });
   }
 
@@ -54,27 +55,21 @@ class VoiceCommandService {
     _silenceTimer?.cancel();
     _startSilenceTimer(onResult);
   }
-  // ========================================================
 
   void _restartListening(Function(String) onResult) {
     if (!_enabled) return;
-
     stopInternal();
     Future.delayed(const Duration(milliseconds: 300), () {
-      if (_enabled) {
-        startListening(onResult);
-      }
+      if (_enabled) startListening(onResult);
     });
   }
 
-  // ❌ إيقاف داخلي (من غير ما يقفل enable)
   void stopInternal() {
     _silenceTimer?.cancel();
     _speech.stop();
     _listening = false;
   }
 
-  // ✅ تستخدمها مع الهولد
   void enable(Function(String) onResult) {
     _enabled = true;
     startListening(onResult);
@@ -85,7 +80,15 @@ class VoiceCommandService {
     stopInternal();
   }
 
-  void dispose() {
-    disable();
+  // ✅ يُستدعى من camera_screen بعد تغيير اللغة
+  // يوقف الجلسة الحالية ويعيد تشغيلها بالـ locale الجديد
+  void restartWithNewLocale(Function(String) onResult) {
+    if (!_enabled) return;
+    stopInternal();
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (_enabled) startListening(onResult);
+    });
   }
+
+  void dispose() => disable();
 }
