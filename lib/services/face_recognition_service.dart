@@ -54,6 +54,19 @@ class FaceRecognitionService {
     }
   }
 
+  // ── تطبيع الاسم: يوحّد الهمزة والألف ويحوّل الإنجليزي لصغير ──────────
+  static String _normalizeName(String name) {
+    // توحيد كل أشكال الألف والهمزة → ا
+    String n = name.trim();
+    n = n.replaceAll(RegExp(r'[أإآ]'), 'ا');
+    // توحيد الياء المقصورة والياء العادية → ي
+    n = n.replaceAll('ى', 'ي');
+    // توحيد التاء المربوطة → ة  (اختياري — أبقيناها كما هي)
+    // تصغير الحروف الإنجليزية
+    n = n.toLowerCase();
+    return n;
+  }
+
   Future<EnrollResult> enrollPerson(
       String name,
       List samples, {
@@ -65,14 +78,21 @@ class FaceRecognitionService {
           message: isArabic ? "النظام غير جاهز" : "System not ready");
     }
 
-    final trimmed = name.trim();
+    final trimmed  = name.trim();           // الاسم الأصلي للعرض
+    final normalized = _normalizeName(trimmed); // المفتاح الموحَّد في الـ DB
 
-    if (_db.containsKey(trimmed)) {
+    // تحقق إن كان هناك اسم مطابق بعد التطبيع
+    final existingKey = _db.keys.firstWhere(
+          (k) => _normalizeName(k) == normalized,
+      orElse: () => '',
+    );
+
+    if (existingKey.isNotEmpty) {
       return EnrollResult(
         success: false,
         message: isArabic
-            ? "الاسم \"$trimmed\" موجود بالفعل، اختر اسماً مختلفاً"
-            : "Name \"$trimmed\" already exists. Choose a different name.",
+            ? "الاسم \"$existingKey\" موجود بالفعل، اختر اسماً مختلفاً"
+            : "Name \"$existingKey\" already exists. Choose a different name.",
       );
     }
 
@@ -114,9 +134,10 @@ class FaceRecognitionService {
         await _saveDb();
         return EnrollResult(
           success: true,
-          message: isArabic
-              ? "تم تغيير الاسم من \"$old\" إلى \"$trimmed\" بنجاح"
-              : "Name updated from \"$old\" to \"$trimmed\" successfully",
+          message: isArabic ? "تم تغيير الاسم من" : "Name changed from",
+          name: trimmed,
+          oldName: old,
+          isUpdate: true,
         );
       }
 
@@ -124,9 +145,8 @@ class FaceRecognitionService {
       await _saveDb();
       return EnrollResult(
         success: true,
-        message: isArabic
-            ? "تم تسجيل \"$trimmed\" بنجاح"
-            : "Enrolled \"$trimmed\" successfully",
+        message: isArabic ? "تم تسجيل" : "Enrolled",
+        name: trimmed,
       );
     } catch (e) {
       return EnrollResult(
@@ -182,10 +202,32 @@ class FaceRecognitionService {
   List<String> get enrolledNames => _db.keys.toList();
 
   Future<bool> deletePerson(String name) async {
-    if (!_db.containsKey(name)) return false;
-    _db.remove(name);
+    // ابحث بالاسم المطابق بعد التطبيع أيضاً
+    final key = _db.keys.firstWhere(
+          (k) => k == name || _normalizeName(k) == _normalizeName(name),
+      orElse: () => '',
+    );
+    if (key.isEmpty) return false;
+    _db.remove(key);
     await _saveDb();
     return true;
+  }
+
+  /// حذف قائمة من الأشخاص دفعةً واحدة
+  Future<int> deletePersons(List<String> names) async {
+    int count = 0;
+    for (final name in names) {
+      final key = _db.keys.firstWhere(
+            (k) => k == name || _normalizeName(k) == _normalizeName(name),
+        orElse: () => '',
+      );
+      if (key.isNotEmpty) {
+        _db.remove(key);
+        count++;
+      }
+    }
+    if (count > 0) await _saveDb();
+    return count;
   }
 
   Future<void> resetAll() async {
@@ -238,8 +280,17 @@ class FaceRecognitionService {
 
 class EnrollResult {
   final bool success;
-  final String message;
-  const EnrollResult({required this.success, required this.message});
+  final String message;   // prefix الجملة (بدون اسم)
+  final String name;      // الاسم الجديد
+  final String oldName;   // الاسم القديم (في حالة التحديث)
+  final bool isUpdate;    // هل هو تحديث لاسم موجود؟
+  const EnrollResult({
+    required this.success,
+    required this.message,
+    this.name = "",
+    this.oldName = "",
+    this.isUpdate = false,
+  });
 }
 
 class RecognizeResult {

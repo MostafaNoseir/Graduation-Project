@@ -143,6 +143,7 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _toggleLanguage() async {
+    if (_enrolling) return; // 🔒 مقفل أثناء التسجيل
     await _tts.toggleLanguage();
     _voice.isArabic = _tts.isArabic;
     await _yolo.loadLabels();
@@ -153,6 +154,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ─────────────────────────────────────────────────────────────────────────
   Future<void> _switchCamera({CameraLensDirection? targetDirection}) async {
+    if (_enrolling) return; // 🔒 مقفل أثناء التسجيل
     if (cameras.length < 2) {
       await _speakDuringCommand(
           _tts.isArabic ? "لا توجد كاميرا أخرى" : "No other camera");
@@ -215,7 +217,7 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _captureAndRecognizeFace() async {
-    if (_busy) return;
+    if (_busy || _enrolling) return; // 🔒 مقفل أثناء التسجيل
     _busy = true;
     try {
       final file = await _cameraService.takePicture();
@@ -242,12 +244,22 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // وضعيات التسجيل — كل وضعية: نص عربي، نص إنجليزي، عدد الصور
+  static const List<(String, String, int)> _enrollPoses = [
+    ("ضع وجهك أمام الكاميرا مباشرةً", "Face the camera directly", 2),
+    ("حرّك وجهك قليلاً نحو اليمين", "Turn your face slightly to the right", 2),
+    ("حرّك وجهك قليلاً نحو اليسار", "Turn your face slightly to the left", 2),
+    ("ارفع وجهك قليلاً لأعلى", "Tilt your face slightly upward", 2),
+    ("انزل وجهك قليلاً لأسفل", "Tilt your face slightly downward", 2),
+  ];
+
   Future<void> _startEnroll() async {
     if (_busy || _enrolling) return;
 
+    // ── طلب الاسم ──────────────────────────────────────────────
     await _tts.speak(_tts.isArabic
-        ? "أدخل اسم الشخص المراد إضافة وجهه"
-        : "Enter the name of the person you want to add");
+        ? "أدخل اسم الشخص المراد إضافة وجهه، اضغط في أي مكان فارغ للإلغاء"
+        : "Enter the name of the person you want to add, tap any empty area to cancel");
 
     final name = await _showNameDialog();
 
@@ -263,49 +275,147 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
+    // ── بدء التسجيل — تعطيل جميع التحكمات ─────────────────────
     _enrolling = true;
     _busy = true;
-    await _speak(_tts.isArabic
-        ? "سألتقط عشر صور، ابق ثابتاً"
-        : "Capturing 10 photos, stay still");
+    _voice.disable(); // ✅ تعطيل الأوامر الصوتية طوال التسجيل
+    setState(() {});
+
+    // ── جملة التعريف كاملة قبل البدء ──────────────────────────
+    // انتظار انتهاء النطق فعلاً ثم وقت ثابت للاستعداد
+    await _tts.speakAndWait(_tts.isArabic
+        ? "سيتم التقاط عشر صور في وضعيات مختلفة، يرجى اتباع التعليمات. يمكنك إلغاء التسجيل في أي وقت بالضغط مرتين على الشاشة"
+        : "10 photos will be captured in different poses, please follow the instructions. You can cancel at any time by double tapping the screen");
+    await Future.delayed(const Duration(seconds: 13));
 
     final samples = <({Uint8List bytes, String path})>[];
-    for (int i = 0; i < 10; i++) {
-      await Future.delayed(const Duration(milliseconds: 600));
-      final file = await _cameraService.takePicture();
-      if (file == null) continue;
-      samples.add((bytes: await file.readAsBytes(), path: file.path));
+    bool cancelled = false; // ✅ للتفريق بين الإلغاء والفشل
+
+    // ── التقاط صور لكل وضعية ───────────────────────────────────
+    for (final pose in _enrollPoses) {
+      if (!_enrolling) { cancelled = true; break; }
+
+      final arText = pose.$1;
+      final enText = pose.$2;
+      final count  = pose.$3;
+
+      // نطق الوضعية والانتظار حتى انتهائه فعلاً
+      await _tts.speakAndWait(_tts.isArabic ? arText : enText);
+      if (!_enrolling) { cancelled = true; break; } // فحص بعد النطق
+
+      await Future.delayed(const Duration(seconds: 1));
+      if (!_enrolling) { cancelled = true; break; } // فحص بعد الاستعداد
+
+      // التقاط الصور لهذه الوضعية
+      for (int i = 0; i < count; i++) {
+        if (!_enrolling) { cancelled = true; break; }
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (!_enrolling) { cancelled = true; break; } // فحص بعد الـ delay
+        final file = await _cameraService.takePicture();
+        if (!_enrolling) { cancelled = true; break; } // فحص بعد التصوير
+        if (file == null) continue;
+        samples.add((bytes: await file.readAsBytes(), path: file.path));
+      }
     }
 
-    final result = await _faceService.enrollPerson(
-        name.trim(), samples,
-        isArabic: _tts.isArabic);
-    await _speak(result.message);
+    // ── إرسال العينات للموديل — فقط إذا اكتملت الصور ولم يُلغَ التسجيل ──
+    if (!cancelled && samples.isNotEmpty) {
+      final result = await _faceService.enrollPerson(
+          name.trim(), samples,
+          isArabic: _tts.isArabic);
+      if (result.success && result.name.isNotEmpty) {
+        if (result.isUpdate) {
+          // "تم تغيير الاسم من [oldName] إلى [name] بنجاح"
+          // نطق oldName و name كل منهما بلغته
+          final ar = _tts.isArabic;
+          final prefix  = ar ? "تم تغيير الاسم من" : "Name changed from";
+          final middle  = ar ? "إلى" : "to";
+          final suffix  = ar ? "بنجاح" : "successfully";
+          await _tts.speakNameChange(
+              prefix, result.oldName, middle, result.name, suffix);
+        } else {
+          // "تم تسجيل [name] بنجاح"
+          final prefix = result.message;
+          final suffix = _tts.isArabic ? " بنجاح" : " successfully";
+          await _tts.speakWithNameAndSuffix(prefix, result.name, suffix);
+        }
+      } else {
+        await _tts.speak(result.message);
+      }
+    } else if (!cancelled) {
+      // فشل حقيقي — لم تُلتقط أي صور
+      await _tts.speak(_tts.isArabic
+          ? "فشل التسجيل، حاول مرة أخرى"
+          : "Enrollment failed, please try again");
+    }
+    // إذا كان cancelled فالرسالة قيلت بالفعل في onDoubleTap
+
     _enrolling = false;
     _busy = false;
-  }
-
-  Future<void> _resetAllFaces() async {
-    if (_busy) return;
-
-    await _tts.speak(_tts.isArabic
-        ? "هل أنت متأكد من حذف جميع الوجوه المحفوظة؟"
-        : "Are you sure you want to delete all saved faces?");
-
-    final confirmed = await _showResetConfirmDialog();
-
-    if (!confirmed) {
-      await _speak(
-          _tts.isArabic ? "تم إلغاء عملية الحذف" : "Deletion cancelled");
-      return;
-    }
-
-    await _faceService.resetAll();
-    await _speak(_tts.isArabic ? "تم مسح جميع الوجوه" : "All faces cleared");
     setState(() {});
   }
 
+  Future<void> _manageFaces() async {
+    if (_busy) return;
+
+    final names = _faceService.enrolledNames;
+    if (names.isEmpty) {
+      await _speak(_tts.isArabic
+          ? "لا يوجد وجوه محفوظة"
+          : "No saved faces");
+      return;
+    }
+
+    await _tts.speak(_tts.isArabic
+        ? "اختر الأشخاص التي تريد حذفهم، اضغط في أي مكان فارغ للإلغاء"
+        : "Select people to delete, tap outside to cancel");
+
+    final toDelete = await _showDeleteDialog(names);
+
+    if (toDelete == null || toDelete.isEmpty) {
+      await _speak(_tts.isArabic ? "تم إلغاء عملية الحذف" : "Deletion cancelled");
+      return;
+    }
+
+    final count = await _faceService.deletePersons(toDelete);
+    setState(() {});
+
+    if (_tts.isArabic) {
+      await _speak(count == 1
+          ? "تم حذف شخص واحد بنجاح"
+          : "تم حذف $count أشخاص بنجاح");
+    } else {
+      await _speak(count == 1
+          ? "1 person deleted successfully"
+          : "$count people deleted successfully");
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
+  Future<List<String>?> _showDeleteDialog(List<String> names) async {
+    // ترتيب أبجدي: عربي أولاً ثم إنجليزي
+    final sorted = List<String>.from(names)
+      ..sort((a, b) {
+        final aAr = RegExp(r'[\u0600-\u06FF]').hasMatch(a);
+        final bAr = RegExp(r'[\u0600-\u06FF]').hasMatch(b);
+        if (aAr && !bAr) return -1;
+        if (!aAr && bAr) return 1;
+        return a.compareTo(b);
+      });
+
+    return showGeneralDialog<List<String>>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: "dismiss",
+      barrierColor: Colors.transparent,
+      pageBuilder: (ctx, _, __) => _DeleteDialogContent(
+        names: sorted,
+        isArabic: _tts.isArabic,
+        onCancel: () => Navigator.pop(ctx),
+      ),
+    );
+  }
+
   Future<String?> _showNameDialog() async {
     final ctrl = TextEditingController();
     final focusNode = FocusNode();
@@ -321,20 +431,6 @@ class _CameraScreenState extends State<CameraScreen> {
         onCancel: () => Navigator.pop(ctx),
       ),
     );
-  }
-
-  Future<bool> _showResetConfirmDialog() async {
-    return await showGeneralDialog<bool>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: "dismiss",
-      barrierColor: Colors.transparent,
-      pageBuilder: (ctx, _, __) => _ResetDialogContent(
-        isArabic: _tts.isArabic,
-        onCancel: () => Navigator.pop(ctx, false),
-      ),
-    ) ??
-        false;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -535,7 +631,21 @@ class _CameraScreenState extends State<CameraScreen> {
                   _holding = false;
                   _voice.disable();
                 },
-                onDoubleTap: _switchCamera,
+                onDoubleTap: () async {
+                  if (_enrolling) {
+                    // ✅ إلغاء التسجيل بضغطتين
+                    _enrolling = false;
+                    _busy = false;
+                    setState(() {});
+                    await _tts.stop();
+                    await Future.delayed(const Duration(milliseconds: 400));
+                    await _tts.speak(_tts.isArabic
+                        ? "تم إلغاء التسجيل"
+                        : "Enrollment cancelled");
+                  } else {
+                    _switchCamera();
+                  }
+                },
               ),
             ),
 
@@ -667,7 +777,7 @@ class _CameraScreenState extends State<CameraScreen> {
             Colors.blueAccent, Colors.white, size, iconSize, _startEnroll),
         SizedBox(width: gap),
         _faceFab("reset", Icons.delete_forever,
-            Colors.redAccent, Colors.white, size, iconSize, _resetAllFaces),
+            Colors.redAccent, Colors.white, size, iconSize, _manageFaces),
       ],
     );
   }
@@ -691,6 +801,7 @@ class _CameraScreenState extends State<CameraScreen> {
     final sel = _mode == mode;
     return GestureDetector(
       onTap: () async {
+        if (_enrolling) return; // 🔒 مقفل أثناء التسجيل
         await _setMode(mode);
         await _speak(_tts.isArabic ? "تم تفعيل $label" : "Mode: $label");
       },
@@ -715,6 +826,7 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _onCapturePressed() async {
+    if (_enrolling) return; // 🔒 مقفل أثناء التسجيل
     switch (_mode) {
       case DetectionMode.objects:
         await _captureAndProcess((b, _) => _yolo.detectImage(b));
@@ -841,33 +953,45 @@ class _NameDialogContent extends StatelessWidget {
   }
 }
 
-class _ResetDialogContent extends StatelessWidget {
+class _DeleteDialogContent extends StatefulWidget {
+  final List<String> names;
   final bool isArabic;
   final VoidCallback onCancel;
 
-  const _ResetDialogContent({
+  const _DeleteDialogContent({
+    required this.names,
     required this.isArabic,
     required this.onCancel,
   });
 
   @override
+  State<_DeleteDialogContent> createState() => _DeleteDialogContentState();
+}
+
+class _DeleteDialogContentState extends State<_DeleteDialogContent> {
+  final Set<String> _selected = {};
+
+  @override
   Widget build(BuildContext context) {
+    final allSelected = _selected.length == widget.names.length;
+
     return Stack(
       children: [
+        // الضغط خارج → إلغاء
         Positioned.fill(
           child: GestureDetector(
-            onTap: onCancel,
-            child: Container(color: Colors.black.withOpacity(0.3)),
+            onTap: widget.onCancel,
+            child: Container(color: Colors.black.withOpacity(0.5)),
           ),
         ),
         Center(
           child: Material(
             color: Colors.transparent,
             child: GestureDetector(
-              onTap: () {},
+              onTap: () {}, // منع إغلاق الـ dialog عند الضغط داخله
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 32),
-                padding: const EdgeInsets.all(24),
+                margin: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.grey[900],
                   borderRadius: BorderRadius.circular(16),
@@ -876,36 +1000,134 @@ class _ResetDialogContent extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── العنوان ──────────────────────────────────────────
                     Text(
-                      isArabic ? "تأكيد المسح" : "Confirm Reset",
+                      widget.isArabic ? "اختر الأشخاص للحذف" : "Select people to delete",
                       style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 18,
+                          fontSize: 17,
                           fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      isArabic
-                          ? "سيتم مسح جميع الوجوه المحفوظة."
-                          : "All saved faces will be deleted.",
-                      style: const TextStyle(color: Colors.white70),
+
+                    // ── تحديد الكل / إلغاء الكل ──────────────────────
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (allSelected) {
+                            _selected.clear();
+                          } else {
+                            _selected.addAll(widget.names);
+                          }
+                        });
+                      },
+                      child: Row(
+                        children: [
+                          Icon(
+                            allSelected
+                                ? Icons.check_box
+                                : Icons.check_box_outline_blank,
+                            color: Colors.white70,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.isArabic
+                                ? (allSelected ? "إلغاء تحديد الكل" : "تحديد الكل")
+                                : (allSelected ? "Deselect all" : "Select all"),
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 14),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 24),
+                    const Divider(color: Colors.white24, height: 20),
+
+                    // ── قائمة الأسماء ────────────────────────────────
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.4,
+                      ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: widget.names.length,
+                        itemBuilder: (_, i) {
+                          final name = widget.names[i];
+                          final checked = _selected.contains(name);
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                if (checked) {
+                                  _selected.remove(name);
+                                } else {
+                                  _selected.add(name);
+                                }
+                              });
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    checked
+                                        ? Icons.check_box
+                                        : Icons.check_box_outline_blank,
+                                    color: checked
+                                        ? Colors.redAccent
+                                        : Colors.white54,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      name,
+                                      style: TextStyle(
+                                        color: checked
+                                            ? Colors.white
+                                            : Colors.white70,
+                                        fontSize: 16,
+                                        fontWeight: checked
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+
+                    const Divider(color: Colors.white24, height: 20),
+
+                    // ── أزرار الإجراء ─────────────────────────────────
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
-                          onPressed: onCancel,
-                          child: Text(isArabic ? "إلغاء" : "Cancel",
-                              style: const TextStyle(color: Colors.grey)),
+                          onPressed: widget.onCancel,
+                          child: Text(
+                            widget.isArabic ? "إلغاء" : "Cancel",
+                            style: const TextStyle(color: Colors.grey),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         TextButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          child: Text(isArabic ? "مسح" : "Reset",
-                              style: const TextStyle(
-                                  color: Colors.redAccent,
-                                  fontWeight: FontWeight.bold)),
+                          onPressed: _selected.isEmpty
+                              ? null
+                              : () => Navigator.pop(
+                              context, _selected.toList()),
+                          child: Text(
+                            widget.isArabic ? "حذف" : "Delete",
+                            style: TextStyle(
+                              color: _selected.isEmpty
+                                  ? Colors.grey
+                                  : Colors.redAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ],
                     ),
