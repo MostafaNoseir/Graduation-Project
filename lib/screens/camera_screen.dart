@@ -152,6 +152,15 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {});
   }
 
+  Future<void> _toggleFlash() async {
+    if (_enrolling) return;
+    await _cameraService.toggleFlash();
+    setState(() {});
+    await _speakDuringCommand(_tts.isArabic
+        ? (_cameraService.isFlashOn ? "تم تشغيل الفلاش" : "تم إيقاف الفلاش")
+        : (_cameraService.isFlashOn ? "Flash on" : "Flash off"));
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   Future<void> _switchCamera({CameraLensDirection? targetDirection}) async {
     if (_enrolling) return; // 🔒 مقفل أثناء التسجيل
@@ -182,6 +191,7 @@ class _CameraScreenState extends State<CameraScreen> {
       orElse: () => cameras.first,
     );
     await _cameraService.init(_currentCamera!);
+    await _cameraService.setFlashOff(); // إيقاف الفلاش عند تبديل الكاميرا
     await _saveState();
     setState(() {});
 
@@ -286,7 +296,7 @@ class _CameraScreenState extends State<CameraScreen> {
     await _tts.speakAndWait(_tts.isArabic
         ? "سيتم التقاط عشر صور في وضعيات مختلفة، يرجى اتباع التعليمات. يمكنك إلغاء التسجيل في أي وقت بالضغط مرتين على الشاشة"
         : "10 photos will be captured in different poses, please follow the instructions. You can cancel at any time by double tapping the screen");
-    await Future.delayed(const Duration(seconds: 13));
+    await Future.delayed(const Duration(seconds: 2));
 
     final samples = <({Uint8List bytes, String path})>[];
     bool cancelled = false; // ✅ للتفريق بين الإلغاء والفشل
@@ -303,7 +313,7 @@ class _CameraScreenState extends State<CameraScreen> {
       await _tts.speakAndWait(_tts.isArabic ? arText : enText);
       if (!_enrolling) { cancelled = true; break; } // فحص بعد النطق
 
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(seconds: 0));
       if (!_enrolling) { cancelled = true; break; } // فحص بعد الاستعداد
 
       // التقاط الصور لهذه الوضعية
@@ -488,6 +498,10 @@ class _CameraScreenState extends State<CameraScreen> {
       await _captureAndProcess(
               (b, _) => _currencyDetector.detectCurrency(b, isArabic: true)); return;
     }
+    if (text.contains("فلاش") || text.contains("كشاف") ||
+        text.contains("ضوء") || text.contains("نور")) {
+      await _toggleFlash(); return;
+    }
     if (text.contains("تعليمات") || text.contains("تعليمة") ||
         text.contains("شرح") || text.contains("مساعدة")) {
       await _openOnboarding(); return;
@@ -537,6 +551,10 @@ class _CameraScreenState extends State<CameraScreen> {
       await _setMode(DetectionMode.currency);
       await _captureAndProcess(
               (b, _) => _currencyDetector.detectCurrency(b, isArabic: false)); return;
+    }
+    if (text.contains("flash") || text.contains("torch") ||
+        text.contains("light")) {
+      await _toggleFlash(); return;
     }
     if (text.contains("instruction") || text.contains("instructions") ||
         text.contains("help") || text.contains("guide")) {
@@ -663,6 +681,26 @@ class _CameraScreenState extends State<CameraScreen> {
                     size: iconBtnSize,
                   ),
                   onPressed: _switchCamera,
+                ),
+              ),
+            ),
+
+            // ── زر الفلاش ──────────────────────────────────────────────
+            Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: IconButton(
+                  icon: Icon(
+                    _cameraService.isFlashOn
+                        ? Icons.flashlight_on
+                        : Icons.flashlight_off,
+                    color: _cameraService.isFlashOn
+                        ? Colors.yellow
+                        : Colors.white,
+                    size: iconBtnSize,
+                  ),
+                  onPressed: _enrolling ? null : _toggleFlash,
                 ),
               ),
             ),

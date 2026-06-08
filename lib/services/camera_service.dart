@@ -22,6 +22,23 @@ class CameraService {
     return await controller!.takePicture();
   }
 
+  /// تشغيل/إيقاف الفلاش
+  Future<void> toggleFlash() async {
+    if (controller == null || !controller!.value.isInitialized) return;
+    final next = controller!.value.flashMode == FlashMode.torch
+        ? FlashMode.off
+        : FlashMode.torch;
+    await controller!.setFlashMode(next);
+  }
+
+  Future<void> setFlashOff() async {
+    if (controller == null || !controller!.value.isInitialized) return;
+    await controller!.setFlashMode(FlashMode.off);
+  }
+
+  bool get isFlashOn =>
+      controller?.value.flashMode == FlashMode.torch;
+
   void dispose() {
     controller?.dispose();
   }

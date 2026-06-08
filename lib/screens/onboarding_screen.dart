@@ -66,6 +66,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           "«اقرأ» أو «نص» — لقراءة النص.\n"
           "«فلوس» أو «نقود» — للتعرف على العملة.\n"
           "«وجه» أو «مين» — للتعرف على الوجه.\n"
+          "«فلاش» أو «كشاف» — لتشغيل أو إيقاف الفلاش.\n"
           "«انجليزي» أو «english» — لتغيير اللغة للإنجليزية.\n"
           "«arabic» — لتغيير اللغة للعربية.\n"
           "«أمامي» أو «قدام» — للكاميرا الأمامية.\n"
@@ -83,10 +84,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
     _SlideData(
       icon: Icons.language,
-      title: "تغيير اللغة",
+      title: "تغيير اللغة والفلاش",
       body:
       "اضغط على أيقونة اللغة في أعلى يمين الشاشة للتبديل بين العربية والإنجليزية.\n\n"
-          "يمكنك أيضاً قول «english» أو «arabic» عبر الأوامر الصوتية.",
+          "اضغط على أيقونة الفلاش في أعلى وسط الشاشة لتشغيل أو إيقاف الإضاءة، مفيد في الأماكن المظلمة.\n\n"
+          "يمكنك أيضاً قول «english» أو «arabic» لتغيير اللغة، و«فلاش» أو «كشاف» لتشغيل الإضاءة عبر الأوامر الصوتية.",
     ),
     _SlideData(
       icon: Icons.security,
@@ -148,6 +150,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           "\"read\" or \"text\" — to read text.\n"
           "\"money\" or \"currency\" — to detect currency.\n"
           "\"face\" or \"who\" — to recognize face.\n"
+          "\"flash\" or \"torch\" — to toggle the flashlight.\n"
           "\"arabic\" — to switch to Arabic.\n"
           "\"english\" — to switch to English.\n"
           "\"selfie\" or \"forward\" — to switch to front camera.\n"
@@ -165,10 +168,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
     _SlideData(
       icon: Icons.language,
-      title: "Change Language",
+      title: "Language & Flash",
       body:
       "Tap the language icon at the top right to switch between Arabic and English.\n\n"
-          "You can also say \"arabic\" or \"english\" via voice commands.",
+          "Tap the flash icon at the top center to toggle the flashlight — useful in dark environments.\n\n"
+          "You can also say \"arabic\" or \"english\" to change language, and \"flash\" or \"torch\" to toggle the light via voice commands.",
     ),
     _SlideData(
       icon: Icons.security,

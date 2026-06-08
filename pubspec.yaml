@@ -23,7 +23,7 @@ dependencies:
   path_provider: ^2.1.5
   shared_preferences: ^2.5.4
   image: ^4.2.0
-
+  http: ^1.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -40,7 +40,6 @@ flutter:
     - assets/labels/labels_new.txt
     - assets/labels/labels_arabic_new.txt
     - assets/icons/
-
 flutter_launcher_icons:
   android: true
   ios: true
