@@ -57,6 +57,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           "وجه — يتعرف على الأشخاص المسجّلين.",
     ),
     _SlideData(
+      icon: Icons.tips_and_updates,
+      title: "نصائح لأفضل دقة",
+      body:
+      "لكل وضع كشف نتائج أدق كلما قربت الكاميرا من الشيء المطلوب تصويره، "
+          "خصوصاً في وضع العملة — قرّب الكاميرا من الورقة النقدية للحصول على نتيجة صحيحة.\n\n"
+          "حاول إبقاء الشيء واضحاً في منتصف الكاميرا وثابتاً لثانية قبل الالتقاط.\n\n"
+          "إذا كانت الإضاءة ضعيفة أو كنت في مكان مظلم، شغّل الكشاف من الأيقونة العلوية "
+          "أو بقول «فلاش» أو «كشاف» لتحسين دقة الكشف بشكل ملحوظ.",
+    ),
+    _SlideData(
       icon: Icons.mic,
       title: "الأوامر الصوتية",
       body:
@@ -139,6 +149,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           "Text — Reads written text.\n"
           "Money — Recognizes Egyptian currency.\n"
           "Face — Recognizes enrolled people.",
+    ),
+    _SlideData(
+      icon: Icons.tips_and_updates,
+      title: "Tips for Better Accuracy",
+      body:
+      "Every detection mode gives more accurate results when you move the camera "
+          "closer to the object — especially in Money mode, where getting closer to "
+          "the banknote is key to a correct result.\n\n"
+          "Try to keep the object centered and hold the camera steady for a second "
+          "before capturing.\n\n"
+          "If the lighting is poor or you're in a dark place, turn on the flashlight "
+          "from the top icon, or say \"flash\" or \"torch\", to noticeably improve detection accuracy.",
     ),
     _SlideData(
       icon: Icons.mic,

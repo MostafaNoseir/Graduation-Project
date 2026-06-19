@@ -45,6 +45,7 @@ class _CameraScreenState extends State<CameraScreen> {
   CameraDescription? _currentCamera;
   bool _holding = false;
   bool _enrolling = false;
+  int _enrollId = 0; // ✅ يتغيّر عند كل إلغاء لإيقاف أي تسجيل قديم في الخلفية
 
   @override
   void initState() {
@@ -154,10 +155,17 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _toggleFlash() async {
     if (_enrolling) return;
+    // 🔒 الكشاف غير متاح مع الكاميرا الأمامية
+    if (_currentCamera?.lensDirection == CameraLensDirection.front) {
+      await _speakDuringCommand(_tts.isArabic
+          ? "الكشاف يعمل مع الكاميرا الخلفية فقط"
+          : "Flash works with back camera only");
+      return;
+    }
     await _cameraService.toggleFlash();
     setState(() {});
     await _speakDuringCommand(_tts.isArabic
-        ? (_cameraService.isFlashOn ? "تم تشغيل الفلاش" : "تم إيقاف الفلاش")
+        ? (_cameraService.isFlashOn ? "تم تشغيل الكشاف" : "تم إيقاف الكشاف")
         : (_cameraService.isFlashOn ? "Flash on" : "Flash off"));
   }
 
@@ -256,11 +264,9 @@ class _CameraScreenState extends State<CameraScreen> {
   // ─────────────────────────────────────────────────────────────────────────
   // وضعيات التسجيل — كل وضعية: نص عربي، نص إنجليزي، عدد الصور
   static const List<(String, String, int)> _enrollPoses = [
-    ("ضع وجهك أمام الكاميرا مباشرةً", "Face the camera directly", 2),
+    ("ضع وجهك أمام الكاميرا مباشرةً", "Face the camera directly", 6),
     ("حرّك وجهك قليلاً نحو اليمين", "Turn your face slightly to the right", 2),
     ("حرّك وجهك قليلاً نحو اليسار", "Turn your face slightly to the left", 2),
-    ("ارفع وجهك قليلاً لأعلى", "Tilt your face slightly upward", 2),
-    ("انزل وجهك قليلاً لأسفل", "Tilt your face slightly downward", 2),
   ];
 
   Future<void> _startEnroll() async {
@@ -286,57 +292,60 @@ class _CameraScreenState extends State<CameraScreen> {
     }
 
     // ── بدء التسجيل — تعطيل جميع التحكمات ─────────────────────
+    _enrollId++;                          // ✅ رقم جديد لكل جلسة تسجيل
+    final myId = _enrollId;              // ✅ نسخة محلية — لو تغيّر معناه إلغاء
     _enrolling = true;
     _busy = true;
-    _voice.disable(); // ✅ تعطيل الأوامر الصوتية طوال التسجيل
+    _voice.disable();
     setState(() {});
 
-    // ── جملة التعريف كاملة قبل البدء ──────────────────────────
-    // انتظار انتهاء النطق فعلاً ثم وقت ثابت للاستعداد
+    // ── جملة التعريف ────────────────────────────────────────────
     await _tts.speakAndWait(_tts.isArabic
         ? "سيتم التقاط عشر صور في وضعيات مختلفة، يرجى اتباع التعليمات. يمكنك إلغاء التسجيل في أي وقت بالضغط مرتين على الشاشة"
         : "10 photos will be captured in different poses, please follow the instructions. You can cancel at any time by double tapping the screen");
     await Future.delayed(const Duration(seconds: 2));
 
     final samples = <({Uint8List bytes, String path})>[];
-    bool cancelled = false; // ✅ للتفريق بين الإلغاء والفشل
+    bool cancelled = false;
+
+    // ✅ الفحص الموحّد: يتأكد من _enrolling وأن الجلسة لم تتغيّر
+    bool isActive() => _enrolling && _enrollId == myId;
 
     // ── التقاط صور لكل وضعية ───────────────────────────────────
     for (final pose in _enrollPoses) {
-      if (!_enrolling) { cancelled = true; break; }
+      if (!isActive()) { cancelled = true; break; }
 
       final arText = pose.$1;
       final enText = pose.$2;
       final count  = pose.$3;
 
-      // نطق الوضعية والانتظار حتى انتهائه فعلاً
       await _tts.speakAndWait(_tts.isArabic ? arText : enText);
-      if (!_enrolling) { cancelled = true; break; } // فحص بعد النطق
+      if (!isActive()) { cancelled = true; break; }
 
       await Future.delayed(const Duration(seconds: 0));
-      if (!_enrolling) { cancelled = true; break; } // فحص بعد الاستعداد
+      if (!isActive()) { cancelled = true; break; }
 
-      // التقاط الصور لهذه الوضعية
       for (int i = 0; i < count; i++) {
-        if (!_enrolling) { cancelled = true; break; }
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (!_enrolling) { cancelled = true; break; } // فحص بعد الـ delay
+        if (!isActive()) { cancelled = true; break; }
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (!isActive()) { cancelled = true; break; }
         final file = await _cameraService.takePicture();
-        if (!_enrolling) { cancelled = true; break; } // فحص بعد التصوير
+        if (!isActive()) { cancelled = true; break; }
         if (file == null) continue;
         samples.add((bytes: await file.readAsBytes(), path: file.path));
       }
     }
 
-    // ── إرسال العينات للموديل — فقط إذا اكتملت الصور ولم يُلغَ التسجيل ──
+    // ✅ فحص نهائي قبل الإرسال للموديل — لو الـ id تغيّر = إلغاء
+    if (!isActive()) cancelled = true;
+
+    // ── إرسال العينات للموديل ────────────────────────────────────
     if (!cancelled && samples.isNotEmpty) {
       final result = await _faceService.enrollPerson(
           name.trim(), samples,
           isArabic: _tts.isArabic);
       if (result.success && result.name.isNotEmpty) {
         if (result.isUpdate) {
-          // "تم تغيير الاسم من [oldName] إلى [name] بنجاح"
-          // نطق oldName و name كل منهما بلغته
           final ar = _tts.isArabic;
           final prefix  = ar ? "تم تغيير الاسم من" : "Name changed from";
           final middle  = ar ? "إلى" : "to";
@@ -344,7 +353,6 @@ class _CameraScreenState extends State<CameraScreen> {
           await _tts.speakNameChange(
               prefix, result.oldName, middle, result.name, suffix);
         } else {
-          // "تم تسجيل [name] بنجاح"
           final prefix = result.message;
           final suffix = _tts.isArabic ? " بنجاح" : " successfully";
           await _tts.speakWithNameAndSuffix(prefix, result.name, suffix);
@@ -353,13 +361,12 @@ class _CameraScreenState extends State<CameraScreen> {
         await _tts.speak(result.message);
       }
     } else if (!cancelled) {
-      // فشل حقيقي — لم تُلتقط أي صور
       await _tts.speak(_tts.isArabic
           ? "فشل التسجيل، حاول مرة أخرى"
           : "Enrollment failed, please try again");
     }
-    // إذا كان cancelled فالرسالة قيلت بالفعل في onDoubleTap
 
+    // ✅ نُعيد الحالة دايماً عند انتهاء هذه الجلسة
     _enrolling = false;
     _busy = false;
     setState(() {});
@@ -651,7 +658,8 @@ class _CameraScreenState extends State<CameraScreen> {
                 },
                 onDoubleTap: () async {
                   if (_enrolling) {
-                    // ✅ إلغاء التسجيل بضغطتين
+                    // ✅ إلغاء التسجيل — تغيير الـ id يوقف أي جلسة شغّالة في الخلفية
+                    _enrollId++;
                     _enrolling = false;
                     _busy = false;
                     setState(() {});
@@ -695,9 +703,11 @@ class _CameraScreenState extends State<CameraScreen> {
                     _cameraService.isFlashOn
                         ? Icons.flashlight_on
                         : Icons.flashlight_off,
-                    color: _cameraService.isFlashOn
+                    color: _currentCamera?.lensDirection == CameraLensDirection.front
+                        ? Colors.white24
+                        : (_cameraService.isFlashOn
                         ? Colors.yellow
-                        : Colors.white,
+                        : Colors.white),
                     size: iconBtnSize,
                   ),
                   onPressed: _enrolling ? null : _toggleFlash,

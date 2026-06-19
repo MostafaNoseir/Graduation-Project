@@ -43,6 +43,6 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/icons/app_icon.png"  # صورة 1024×1024 png
-  adaptive_icon_background: "#0F2A44"       # لون الخلفية على Android
+  image_path: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#0F2A44"
   adaptive_icon_foreground: "assets/icons/app_icon.png"
