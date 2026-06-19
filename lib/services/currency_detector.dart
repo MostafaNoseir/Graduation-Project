@@ -117,11 +117,11 @@ class CurrencyDetector {
       case '10':
         return isArabic ? "عشرة جنيهات" : "Ten Pounds";
       case '10 (new)':
-        return isArabic ? "عشرة جنيهات" : "Ten Pounds";
+        return isArabic ? "عشرة جنيهات جديدة" : "New Ten Pounds";
       case '20':
         return isArabic ? "عشرين جنيها" : "Twenty Pounds";
       case '20 (new)':
-        return isArabic ? "عشرين جنيها" : "Twenty Pounds";
+        return isArabic ? "عشرين جنيها جديدة" : "New Twenty Pounds";
       case '50':
         return isArabic ? "خمسين جنيها" : "Fifty Pounds";
       case '100':
